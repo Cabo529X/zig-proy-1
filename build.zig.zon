@@ -1,0 +1,19 @@
+.{
+    .name = .proyecto_01,
+    .version = "0.1.0",
+    .fingerprint = 0x865d92dc238991a8, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // Misma version fijada que en Labs/lab-02: ya esta en la cache local
+        // de paquetes, asi que el proyecto compila sin conexion.
+        .raylib_zig = .{
+            .url = "git+https://github.com/raylib-zig/raylib-zig#97be2c7ae646a2f09856604b138c427c0af1b952",
+            .hash = "raylib_zig-6.0.0-KE8REDJ4BQBu7lKwYNt6R4j5ywPeS37zqW6zrtjCcRwH",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
