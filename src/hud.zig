@@ -51,9 +51,13 @@ pub fn drawMinimap(w: *const World, p: *const Player) void {
                 .door => if (w.doorIsOpen(x, y)) CYAN_DIM else AMBER,
                 .exit => blk: {
                     if (!w.exit_open) break :blk RED;
-                    // parpadea cuando ya se puede cruzar, para que salte a la vista
+                    // Late entre cian y blanco, pero SIEMPRE opaca. Antes se
+                    // pulsaba el alfa y al bajar se confundia con el fondo:
+                    // justo cuando la esclusa se abre y mas hay que verla,
+                    // parecia que desaparecia del minimapa.
                     const pulse = 0.5 + 0.5 * @sin(@as(f32, @floatCast(rl.getTime())) * 5.0);
-                    break :blk rl.Color.init(60, 240, 255, @intFromFloat(120 + 135 * pulse));
+                    const lift: u8 = @intFromFloat(pulse * 195.0);
+                    break :blk rl.Color.init(60 + lift, 240, 255, 255);
                 },
                 .empty => unreachable,
             };
@@ -64,6 +68,24 @@ pub fn drawMinimap(w: *const World, p: *const Player) void {
                 cell_px,
                 color,
             );
+        }
+    }
+
+    // Marco parpadeante alrededor de la esclusa ya abierta: con celdas de 7 px
+    // un tile suelto se pierde entre los demas, y este es el objetivo del nivel.
+    if (w.exit_open) {
+        var ey: i32 = 0;
+        while (ey < w.height) : (ey += 1) {
+            var ex: i32 = 0;
+            while (ex < w.width) : (ex += 1) {
+                if (w.at(ex, ey) != .exit) continue;
+                rl.drawRectangleLinesEx(.{
+                    .x = ox + @as(f32, @floatFromInt(ex)) * cell - 3,
+                    .y = oy + @as(f32, @floatFromInt(ey)) * cell - 3,
+                    .width = @as(f32, @floatFromInt(cell_px)) + 6,
+                    .height = @as(f32, @floatFromInt(cell_px)) + 6,
+                }, 2, CYAN);
+            }
         }
     }
 

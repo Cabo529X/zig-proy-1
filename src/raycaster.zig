@@ -21,6 +21,11 @@ const FOG_K: f32 = 0.22;
 const FOG_FLOOR: f32 = 0.13; // luz minima: nunca se llega al negro absoluto
 const SIDE_SHADE: f32 = 0.72; // caras norte/sur mas oscuras que este/oeste
 const MIN_DIST: f32 = 1e-4;
+/// Plano cercano de los sprites. Mas cerca que esto, un billboard se magnifica
+/// tanto que llena la pantalla de bloques gigantes y su desplazamiento vertical
+/// lo manda fuera de cuadro: se lee como un error de dibujo, no como un objeto.
+/// Es preferible que desaparezca cuando ya lo tienes encima.
+const SPRITE_NEAR_CLIP: f32 = 0.55;
 
 pub const Framebuffer = struct {
     width: i32,
@@ -191,6 +196,12 @@ pub fn renderWorld(fb: *Framebuffer, w: *const World, p: *const Player, atlas: *
 
 /// Piso y techo con un raycast horizontal por fila. Se dibujan antes que las
 /// paredes para que estas los tapen sin necesidad de recortar nada.
+///
+/// Cada fila se resuelve sola: su distancia al horizonte decide si es piso o
+/// techo y a que distancia esta. Antes el techo se dibujaba espejando las filas
+/// de piso, y eso dejaba la parte de arriba de la pantalla sin repintar cuando
+/// el jugador miraba hacia arriba (pocas filas de piso => pocas filas de techo),
+/// con lo que sobrevivian pixeles del cuadro anterior como manchas pegadas.
 fn renderFloorAndCeiling(fb: *Framebuffer, p: *const Player, atlas: *const Atlas, center: f32) void {
     const width_f: f32 = @floatFromInt(fb.width);
     const height_f: f32 = @floatFromInt(fb.height);
@@ -203,10 +214,12 @@ fn renderFloorAndCeiling(fb: *Framebuffer, p: *const Player, atlas: *const Atlas
 
     var y: i32 = 0;
     while (y < fb.height) : (y += 1) {
-        const p_row = @as(f32, @floatFromInt(y)) + 0.5 - center;
-        // Por encima del horizonte no hay piso que proyectar; esa mitad la
-        // cubre el techo, que se dibuja espejado respecto de `center`.
-        if (p_row <= 0.5) continue;
+        const offset = @as(f32, @floatFromInt(y)) + 0.5 - center;
+        const below_horizon = offset > 0;
+        // La fila exacta del horizonte proyecta al infinito. Se le pone un piso
+        // de medio pixel para que la distancia quede acotada: asi esa fila sale
+        // del color de la niebla en vez de quedarse sin pintar.
+        const p_row = @max(@abs(offset), 0.5);
 
         const row_dist = (0.5 * height_f) / p_row;
         const step_x = row_dist * (rdx1 - rdx0) / width_f;
@@ -214,8 +227,8 @@ fn renderFloorAndCeiling(fb: *Framebuffer, p: *const Player, atlas: *const Atlas
         var fx = p.x + row_dist * rdx0;
         var fy = p.y + row_dist * rdy0;
 
-        const ceil_y: i32 = @intFromFloat(std.math.clamp(center - p_row, -1.0, height_f));
-        const draw_ceiling = ceil_y >= 0 and ceil_y < fb.height;
+        const kind: textures.Wall = if (below_horizon) .floor else .ceiling;
+        var idx: usize = @intCast(y * fb.width);
 
         var x: i32 = 0;
         while (x < fb.width) : (x += 1) {
@@ -223,11 +236,8 @@ fn renderFloorAndCeiling(fb: *Framebuffer, p: *const Player, atlas: *const Atlas
             const ty: i32 = @intFromFloat((fy - @floor(fy)) * tex_f);
             fx += step_x;
             fy += step_y;
-
-            fb.pixels[@intCast(y * fb.width + x)] = fog(atlas.wallTexel(.floor, tx, ty), row_dist);
-            if (draw_ceiling) {
-                fb.pixels[@intCast(ceil_y * fb.width + x)] = fog(atlas.wallTexel(.ceiling, tx, ty), row_dist);
-            }
+            fb.pixels[idx] = fog(atlas.wallTexel(kind, tx, ty), row_dist);
+            idx += 1;
         }
     }
 }
@@ -272,7 +282,7 @@ pub fn renderSprites(fb: *Framebuffer, w: *const World, p: *const Player, atlas:
         const rel_y = s.y - p.y;
         const tx = inv_det * (p.dir_y * rel_x - p.dir_x * rel_y);
         const ty = inv_det * (-p.plane_y * rel_x + p.plane_x * rel_y);
-        if (ty <= 0.05) continue; // detras de la camara o pegado al ojo
+        if (ty <= SPRITE_NEAR_CLIP) continue; // detras de la camara o encima del ojo
 
         const screen_x = (width_f * 0.5) * (1.0 + tx / ty);
         const size = @abs(height_f / ty);
@@ -449,4 +459,76 @@ test "una pared tapa un sprite que esta detras de ella" {
     const wall_only = fb.pixels[@intCast(18 * fb.width + 32)];
     renderSprites(&fb, &w, &p, &atlas);
     try testing.expect(!std.meta.eql(wall_only, fb.pixels[@intCast(18 * fb.width + 32)]));
+}
+
+test "el frame se repinta completo con cualquier pitch" {
+    const atlas = try textures.Atlas.init(testing.allocator);
+    defer testing.allocator.free(atlas.walls);
+    defer testing.allocator.free(atlas.sprites);
+    var fb = try Framebuffer.init(testing.allocator, 96, 54);
+    defer testing.allocator.free(fb.pixels);
+    defer testing.allocator.free(fb.depth);
+
+    // Si un pixel del cuadro anterior sobrevive al render, se ve como una
+    // mancha pegada en pantalla. Se marca todo con un color imposible y se
+    // exige que no quede ni uno solo.
+    const STALE = rl.Color.init(255, 0, 255, 7);
+
+    const w = World.load(0);
+    var p = Player.spawn(&w);
+    var a: f32 = 0;
+    while (a < std.math.tau) : (a += 0.35) {
+        p.setAngle(a);
+        for ([_]f32{ -player.PITCH_LIMIT, -40, 0, 40, player.PITCH_LIMIT }) |pitch| {
+            p.pitch = pitch;
+            @memset(fb.pixels, STALE);
+            renderWorld(&fb, &w, &p, &atlas);
+            for (fb.pixels, 0..) |c, i| {
+                if (std.meta.eql(c, STALE)) {
+                    std.debug.print("pixel sin pintar en fila {d} con pitch {d}\n", .{ i / @as(usize, @intCast(fb.width)), pitch });
+                    return error.FrameIncompleto;
+                }
+            }
+        }
+    }
+}
+
+test "un sprite encima de la camara no se dibuja" {
+    const atlas = try textures.Atlas.init(testing.allocator);
+    defer testing.allocator.free(atlas.walls);
+    defer testing.allocator.free(atlas.sprites);
+    var fb = try Framebuffer.init(testing.allocator, 64, 36);
+    defer testing.allocator.free(fb.pixels);
+    defer testing.allocator.free(fb.depth);
+
+    var w = World.fromRows(&ROOM, 0);
+    var p = Player.spawn(&w);
+    p.x = 4.5;
+    p.y = 7.5;
+    p.setAngle(0);
+
+    // Sin sprites: la referencia.
+    w.sprite_count = 0;
+    renderWorld(&fb, &w, &p, &atlas);
+    renderSprites(&fb, &w, &p, &atlas);
+    const reference = try testing.allocator.dupe(rl.Color, fb.pixels);
+    defer testing.allocator.free(reference);
+
+    // Un dron practicamente pegado al ojo: magnificado llenaria la pantalla de
+    // bloques, asi que tiene que quedar recortado por el plano cercano.
+    w.sprite_count = 1;
+    w.sprites[0] = .{ .x = 4.7, .y = 7.5, .kind = .drone, .z_offset = 0.28 };
+    renderWorld(&fb, &w, &p, &atlas);
+    renderSprites(&fb, &w, &p, &atlas);
+    for (reference, fb.pixels) |a, b| try testing.expect(std.meta.eql(a, b));
+
+    // Pero a una distancia normal si tiene que verse.
+    w.sprites[0] = .{ .x = 6.5, .y = 7.5, .kind = .drone, .z_offset = 0.28 };
+    renderWorld(&fb, &w, &p, &atlas);
+    renderSprites(&fb, &w, &p, &atlas);
+    var changed: u32 = 0;
+    for (reference, fb.pixels) |a, b| {
+        if (!std.meta.eql(a, b)) changed += 1;
+    }
+    try testing.expect(changed > 0);
 }
