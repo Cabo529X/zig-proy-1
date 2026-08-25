@@ -48,8 +48,6 @@ pub fn build(b: *std.Build) void {
         "src/player.zig",
         "src/raycaster.zig",
         "src/textures.zig",
-        "src/audio.zig",
-        "src/music.zig",
     };
     for (test_files) |path| {
         const t = b.addTest(.{

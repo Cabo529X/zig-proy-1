@@ -73,8 +73,35 @@ fn deadzone(v: f32) f32 {
     return if (@abs(v) < STICK_DEADZONE) 0 else v;
 }
 
+/// ---------------------------------------------------------------------
+/// COMO SE REPRESENTA LA CAMARA (para exponer):
+///
+/// El jugador vive en un mapa 2D (x, y en unidades de "tiles"). No hay
+/// angulo en grados guardado en ningun lado: la direccion en la que mira
+/// se guarda como un VECTOR UNITARIO (dir_x, dir_y), es decir un punto
+/// sobre el circulo de radio 1. Girar la camara es simplemente rotar ese
+/// vector.
+///
+/// Ademas del vector de vista se guarda el "plano de camara"
+/// (plane_x, plane_y): un vector PERPENDICULAR a dir_x/dir_y. Este plano
+/// es el que abre el campo de vision (FOV). Para cada columna de pantalla
+/// se combina dir + plane*camera_x (ver raycaster.zig -> renderWorld) y
+/// asi se generan todos los rayos del abanico de vision, desde el borde
+/// izquierdo hasta el borde derecho de la pantalla.
+///
+///        plane (ancho del FOV)
+///        <---------->
+///              ^
+///              | dir (hacia donde miras)
+///              |
+///           (jugador)
+///
+/// Este truco (direccion + plano perpendicular) es la base de TODO
+/// raycaster estilo Wolfenstein 3D: con dos vectores de 2 numeros cada
+/// uno alcanza para describir posicion, direccion Y campo de vision.
+/// ---------------------------------------------------------------------
 pub const Player = struct {
-    x: f32,
+    x: f32, // posicion en el mundo, en unidades de tile (no pixeles)
     y: f32,
     dir_x: f32, // vector unitario de vista
     dir_y: f32,
@@ -86,6 +113,7 @@ pub const Player = struct {
 
     /// Medio ancho del plano de camara. tan(33 grados) ~ 0.66 da un FOV de 66,
     /// que es el clasico de este tipo de raycaster.
+    /// (FOV total = 2 * atan(FOV_TAN) ~ 66 grados)
     pub const FOV_TAN: f32 = 0.66;
 
     pub fn spawn(w: *const World) Player {
@@ -104,6 +132,14 @@ pub const Player = struct {
         return p;
     }
 
+    /// Fija la direccion de la camara a partir de un angulo absoluto (radianes).
+    /// (cos, sin) es exactamente el punto sobre el circulo unitario que apunta
+    /// hacia ese angulo: por eso dir_x/dir_y quedan siempre con largo 1.
+    ///
+    /// El plano de camara se obtiene rotando dir 90 grados y multiplicando por
+    /// FOV_TAN. Rotar 90 grados en 2D es tan simple como intercambiar x <-> y y
+    /// cambiarle el signo a uno de los dos: (x, y) -> (-y, x). Ese es exactamente
+    /// el calculo de las dos lineas de abajo.
     pub fn setAngle(self: *Player, radians: f32) void {
         self.dir_x = @cos(radians);
         self.dir_y = @sin(radians);
@@ -114,9 +150,19 @@ pub const Player = struct {
     /// Rota la vista aplicando la misma matriz 2x2 a la direccion y al plano de
     /// camara. Tienen que girar juntos: si se desincronizan, el plano deja de
     /// ser perpendicular a la vista y toda la imagen sale deformada.
+    ///
+    /// La matriz de rotacion 2D estandar es:
+    ///   | cos(a)  -sin(a) |   | x |   | x*cos(a) - y*sin(a) |
+    ///   | sin(a)   cos(a) | * | y | = | x*sin(a) + y*cos(a) |
+    /// Se aplica una vez al vector (dir_x, dir_y) y otra vez al vector
+    /// (plane_x, plane_y); como es una rotacion rigida, el angulo entre ambos
+    /// vectores (90 grados) se conserva, y por eso el plano sigue perpendicular
+    /// a la vista despues de girar.
     pub fn rotate(self: *Player, radians: f32) void {
         const c = @cos(radians);
         const s = @sin(radians);
+        // Se guardan las componentes "x" viejas ANTES de pisarlas, porque la
+        // formula de dir_y y plane_y todavia necesita el dir_x/plane_x original.
         const dx = self.dir_x;
         const px = self.plane_x;
         self.dir_x = dx * c - self.dir_y * s;
@@ -128,17 +174,33 @@ pub const Player = struct {
     /// Avanza un frame. Devuelve true en el instante en que el cabeceo toca su
     /// punto mas bajo, que es cuando main dispara el sonido de pisada.
     pub fn update(self: *Player, w: *const World, raw_dt: f32, in: Input) bool {
+        // dt = "delta time", los segundos que duro el ultimo cuadro. Multiplicar
+        // cualquier velocidad por dt es lo que hace que el juego se mueva igual
+        // de rapido sin importar si la maquina da 30 FPS o 300 FPS.
         const dt = @min(raw_dt, MAX_DT);
 
+        // --- Giro horizontal (yaw) ---
+        // in.turn viene de teclado/stick y esta en unidades de "-1..1 por
+        // segundo", por eso se multiplica por dt. in.turn_delta ya viene en
+        // radianes de ESTE frame (el mouse reporta pixeles movidos, no una
+        // velocidad), asi que se suma directo, sin volver a multiplicar por dt.
         const turn = in.turn * TURN_SPEED * dt + in.turn_delta;
         if (turn != 0) self.rotate(turn);
 
+        // --- Cabeceo vertical (pitch) ---
+        // No hay una camara 3D real: "mirar arriba/abajo" es solo desplazar
+        // hacia arriba o abajo la fila donde se dibuja el horizonte (ver
+        // `center` en raycaster.renderWorld). Por eso pitch se mide en pixeles
+        // del framebuffer y no en radianes.
         const look = in.look * PITCH_SPEED * dt + in.look_delta;
         self.pitch = std.math.clamp(self.pitch + look, -PITCH_LIMIT, PITCH_LIMIT);
 
+        // --- Movimiento (avanzar/atras y strafe lateral) ---
         const speed: f32 = if (in.run) SPEED_RUN else SPEED_WALK;
         // El strafe usa la perpendicular unitaria a la vista, no el plano de
         // camara, porque ese esta escalado por el FOV y moveria mas despacio.
+        // (dir_x, dir_y) es "hacia adelante"; (-dir_y, dir_x) es esa misma
+        // direccion rotada 90 grados, o sea "hacia la derecha del jugador".
         const dx = (self.dir_x * in.forward - self.dir_y * in.strafe) * speed * dt;
         const dy = (self.dir_y * in.forward + self.dir_x * in.strafe) * speed * dt;
 

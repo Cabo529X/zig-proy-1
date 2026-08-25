@@ -4,7 +4,6 @@ const rl = @import("raylib");
 const audio = @import("audio.zig");
 const hud = @import("hud.zig");
 const levels = @import("levels.zig");
-const music = @import("music.zig");
 const player = @import("player.zig");
 const raycaster = @import("raycaster.zig");
 const textures = @import("textures.zig");
@@ -48,17 +47,12 @@ pub fn main() !void {
     rl.initAudioDevice();
     defer rl.closeAudioDevice();
 
-    var sfx = try audio.Sfx.init(gpa);
+    var sfx = try audio.Sfx.init();
     defer sfx.unload();
 
-    // El WAV vive mientras suene la musica: raylib decodifica desde este mismo
-    // buffer, no se queda con una copia. Por eso se libera despues de descargar
-    // el stream (los defer corren en orden inverso al de registro).
-    const music_wav = try music.renderWav(gpa);
-    defer gpa.free(music_wav);
     // Unico catch del proyecto, y esta aqui a proposito: un problema de audio
     // nunca debe tumbar el juego, simplemente se juega en silencio.
-    const tune: ?rl.Music = rl.loadMusicStreamFromMemory(".wav", music_wav) catch null;
+    const tune: ?rl.Music = rl.loadMusicStream("assets/audio/music_ambient.mp3") catch null;
     defer if (tune) |m| rl.unloadMusicStream(m);
     if (tune) |m| {
         var looped = m;

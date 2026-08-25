@@ -185,6 +185,20 @@ pub const World = struct {
     /// Prueba las cuatro esquinas del cuadrado que envuelve al jugador. Con un
     /// radio menor a medio tile esto es exacto: ninguna esquina de muro puede
     /// colarse entre dos muestras sin tocar alguna de ellas.
+    ///
+    /// Idea grafica: el jugador se trata como un circulo de radio `radius`.
+    /// En vez de comprobar colision circulo-contra-poligono (caro y delicado),
+    /// se aproxima el circulo por el cuadrado que lo contiene y se pregunta en
+    /// que celda de la grilla cae cada una de sus 4 esquinas:
+    ///
+    ///     (x0,y0)---------(x1,y0)
+    ///        |    jugador    |
+    ///        |   (circulo)   |
+    ///     (x0,y1)---------(x1,y1)
+    ///
+    /// Si CUALQUIERA de esas 4 celdas es solida, se considera que hay choque.
+    /// `@floor` convierte la coordenada de mundo (float) al indice de tile
+    /// (entero) que la contiene.
     pub fn blocksCircle(self: *const World, x: f32, y: f32, radius: f32) bool {
         const x0: i32 = @intFromFloat(@floor(x - radius));
         const x1: i32 = @intFromFloat(@floor(x + radius));

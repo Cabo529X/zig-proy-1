@@ -23,11 +23,7 @@ pub const EMISSIVE: u8 = 254;
 pub const VOID = rl.Color.init(8, 10, 20, 255);
 pub const STEEL_DARK = rl.Color.init(28, 34, 46, 255);
 pub const STEEL_MID = rl.Color.init(58, 68, 86, 255);
-pub const STEEL_LIGHT = rl.Color.init(96, 110, 132, 255);
 pub const NEON_CYAN = rl.Color.init(60, 240, 255, EMISSIVE);
-pub const NEON_AMBER = rl.Color.init(255, 170, 60, EMISSIVE);
-pub const ALERT_RED = rl.Color.init(255, 60, 60, EMISSIVE);
-pub const HAZARD_YEL = rl.Color.init(220, 190, 60, 255);
 
 /// Indices dentro del atlas de paredes. Las puertas y la esclusa tienen dos
 /// variantes porque su indicador cambia de rojo a cian al desbloquearse.
@@ -48,23 +44,36 @@ const CORE_FRAMES: usize = 6;
 const STEAM_FRAMES: usize = 4;
 const SPRITE_FRAMES: usize = CORE_FRAMES + STEAM_FRAMES;
 
-/// Hash entero de dos dimensiones (finalizer estilo murmur3). Es la fuente de
-/// todo el ruido de las texturas: no necesita allocator ni estado, y al ser
-/// determinista la misma textura sale identica en cada corrida, que es lo que
-/// permite fijarla en una prueba.
-fn hash2(x: u32, y: u32, seed: u32) u32 {
-    var h: u32 = x *% 0x27d4_eb2d ^ y *% 0x1656_67b1 ^ seed *% 0x85eb_ca6b;
-    h ^= h >> 15;
-    h *%= 0x2545_f491;
-    h ^= h >> 13;
-    h *%= 0x27d4_eb2d;
-    h ^= h >> 16;
-    return h;
-}
+/// PNG de cada pared, empacados dentro del ejecutable con @embedFile: el
+/// binario sigue siendo un solo archivo, no hay que repartir una carpeta
+/// assets/ junto a el.
+const WALL_PNGS = [WALL_COUNT][]const u8{
+    @embedFile("assets/textures/wall_panel.png"),
+    @embedFile("assets/textures/wall_grate.png"),
+    @embedFile("assets/textures/wall_neon.png"),
+    @embedFile("assets/textures/wall_door_locked.png"),
+    @embedFile("assets/textures/wall_door_open.png"),
+    @embedFile("assets/textures/wall_exit_locked.png"),
+    @embedFile("assets/textures/wall_exit_open.png"),
+    @embedFile("assets/textures/wall_floor.png"),
+    @embedFile("assets/textures/wall_ceiling.png"),
+};
 
-fn noise01(x: u32, y: u32, seed: u32) f32 {
-    return @as(f32, @floatFromInt(hash2(x, y, seed) >> 8)) / 16777216.0;
-}
+const CORE_PNGS = [CORE_FRAMES][]const u8{
+    @embedFile("assets/textures/sprite_core_0.png"),
+    @embedFile("assets/textures/sprite_core_1.png"),
+    @embedFile("assets/textures/sprite_core_2.png"),
+    @embedFile("assets/textures/sprite_core_3.png"),
+    @embedFile("assets/textures/sprite_core_4.png"),
+    @embedFile("assets/textures/sprite_core_5.png"),
+};
+
+const STEAM_PNGS = [STEAM_FRAMES][]const u8{
+    @embedFile("assets/textures/sprite_steam_0.png"),
+    @embedFile("assets/textures/sprite_steam_1.png"),
+    @embedFile("assets/textures/sprite_steam_2.png"),
+    @embedFile("assets/textures/sprite_steam_3.png"),
+};
 
 pub fn mix(a: rl.Color, b: rl.Color, t: f32) rl.Color {
     const k = std.math.clamp(t, 0, 1);
@@ -90,51 +99,29 @@ fn mulU8(v: u8, k: f32) u8 {
     return @intFromFloat(std.math.clamp(@as(f32, @floatFromInt(v)) * k, 0, 255));
 }
 
-fn put(buf: []rl.Color, w: i32, x: i32, y: i32, c: rl.Color) void {
-    if (x < 0 or y < 0 or x >= w or y >= w) return;
-    buf[@intCast(y * w + x)] = c;
-}
-
-fn get(buf: []const rl.Color, w: i32, x: i32, y: i32) rl.Color {
-    if (x < 0 or y < 0 or x >= w or y >= w) return VOID;
-    return buf[@intCast(y * w + x)];
-}
-
-/// Remache de 3x3 con la luz arriba a la izquierda y la sombra abajo a la
-/// derecha. Repetido en las juntas es lo que hace que un panel plano se lea
-/// como una placa atornillada.
-fn rivet(buf: []rl.Color, cx: i32, cy: i32, base: rl.Color) void {
-    put(buf, TEX_SIZE, cx, cy, shade(base, 1.35));
-    put(buf, TEX_SIZE, cx - 1, cy, shade(base, 1.15));
-    put(buf, TEX_SIZE, cx, cy - 1, shade(base, 1.15));
-    put(buf, TEX_SIZE, cx + 1, cy, shade(base, 0.7));
-    put(buf, TEX_SIZE, cx, cy + 1, shade(base, 0.7));
-}
-
 pub const Atlas = struct {
     walls: []rl.Color, // WALL_COUNT texturas de TEX_SIZE x TEX_SIZE
     sprites: []rl.Color, // SPRITE_FRAMES cuadros de SPR_SIZE x SPR_SIZE
 
-    /// Dibuja todo el pixel art una sola vez al arrancar. Nada de esto sube a
-    /// la GPU: el renderer de CPU muestrea estos buffers directo, asi que la
-    /// unica textura de OpenGL en todo el programa es la del framebuffer.
+    /// Decodifica los PNG embebidos una sola vez al arrancar. Nada de esto
+    /// sube a la GPU: el renderer de CPU muestrea estos buffers directo, asi
+    /// que la unica textura de OpenGL en todo el programa es la del
+    /// framebuffer.
     pub fn init(gpa: std.mem.Allocator) !Atlas {
         const walls = try gpa.alloc(rl.Color, WALL_COUNT * TEX_PIXELS);
         errdefer gpa.free(walls);
         const sprites = try gpa.alloc(rl.Color, SPRITE_FRAMES * SPR_PIXELS);
+        errdefer gpa.free(sprites);
 
-        genPanel(wallSlice(walls, .panel), 1337, 1.0);
-        genGrate(wallSlice(walls, .grate));
-        genNeon(wallSlice(walls, .neon));
-        genDoor(wallSlice(walls, .door_locked), false);
-        genDoor(wallSlice(walls, .door_open), true);
-        genExit(wallSlice(walls, .exit_locked), false);
-        genExit(wallSlice(walls, .exit_open), true);
-        genGrate(wallSlice(walls, .floor));
-        genCeiling(wallSlice(walls, .ceiling));
-
-        for (0..CORE_FRAMES) |f| genCoreFrame(spriteSlice(sprites, f), f);
-        for (0..STEAM_FRAMES) |f| genSteamFrame(spriteSlice(sprites, CORE_FRAMES + f), f);
+        for (WALL_PNGS, 0..) |png, i| {
+            try loadPng(walls[i * TEX_PIXELS ..][0..TEX_PIXELS], png, TEX_SIZE, TEX_SIZE);
+        }
+        for (CORE_PNGS, 0..) |png, i| {
+            try loadPng(sprites[i * SPR_PIXELS ..][0..SPR_PIXELS], png, SPR_SIZE, SPR_SIZE);
+        }
+        for (STEAM_PNGS, 0..) |png, i| {
+            try loadPng(sprites[(CORE_FRAMES + i) * SPR_PIXELS ..][0..SPR_PIXELS], png, SPR_SIZE, SPR_SIZE);
+        }
 
         return .{ .walls = walls, .sprites = sprites };
     }
@@ -165,14 +152,16 @@ pub const Atlas = struct {
     }
 };
 
-fn wallSlice(walls: []rl.Color, kind: Wall) []rl.Color {
-    const base = @intFromEnum(kind) * TEX_PIXELS;
-    return walls[base .. base + TEX_PIXELS];
-}
-
-fn spriteSlice(sprites: []rl.Color, frame: usize) []rl.Color {
-    const base = frame * SPR_PIXELS;
-    return sprites[base .. base + SPR_PIXELS];
+/// Decodifica un PNG embebido y copia sus pixeles a `dst`. Los PNG estan al
+/// tamano exacto que espera el atlas, asi que un tamano distinto es un error
+/// de build, no algo que tolerar en tiempo de ejecucion.
+fn loadPng(dst: []rl.Color, png_bytes: []const u8, w: i32, h: i32) !void {
+    const image = try rl.loadImageFromMemory(".png", png_bytes);
+    defer rl.unloadImage(image);
+    std.debug.assert(image.width == w and image.height == h);
+    const colors = try rl.loadImageColors(image);
+    defer rl.unloadImageColors(colors);
+    @memcpy(dst, colors);
 }
 
 /// Traduce un tile del mundo a la textura que le toca, resolviendo aqui las dos
@@ -187,217 +176,7 @@ pub fn wallFor(tile: Tile, unlocked: bool) Wall {
     };
 }
 
-// ---------------------------------------------------------------- generadores
-
-fn genPanel(buf: []rl.Color, seed: u32, brightness: f32) void {
-    var y: i32 = 0;
-    while (y < TEX_SIZE) : (y += 1) {
-        var x: i32 = 0;
-        while (x < TEX_SIZE) : (x += 1) {
-            const ux: u32 = @intCast(x);
-            const uy: u32 = @intCast(y);
-            // El segundo termino depende solo de x, asi que el grano queda
-            // alineado en vertical y se lee como metal cepillado en vez de
-            // estatica de television.
-            const g = 0.25 * noise01(ux, uy, seed) + 0.15 * noise01(ux, 0, seed);
-            var c = mix(STEEL_MID, STEEL_DARK, g);
-            if (@rem(x, 16) == 0 or @rem(y, 32) == 0) c = shade(STEEL_DARK, 0.6);
-            if (@rem(x, 16) == 1 or @rem(y, 32) == 1) c = STEEL_LIGHT;
-            if (noise01(ux / 8, uy / 8, seed +% 1) > 0.93) c = shade(c, 0.85);
-            put(buf, TEX_SIZE, x, y, shade(c, brightness));
-        }
-    }
-    var ry: i32 = 3;
-    while (ry < TEX_SIZE) : (ry += 32) {
-        var rx: i32 = 3;
-        while (rx < TEX_SIZE) : (rx += 16) {
-            rivet(buf, rx, ry, shade(STEEL_LIGHT, brightness));
-        }
-    }
-}
-
-fn genGrate(buf: []rl.Color) void {
-    var y: i32 = 0;
-    while (y < TEX_SIZE) : (y += 1) {
-        var x: i32 = 0;
-        while (x < TEX_SIZE) : (x += 1) {
-            const mx = @rem(x, 8);
-            const my = @rem(y, 8);
-            var c: rl.Color = undefined;
-            if (mx < 3 or my < 3) {
-                c = STEEL_MID;
-                if (mx == 0 or my == 0) c = STEEL_LIGHT; // canto iluminado
-                if (mx == 2 or my == 2) c = STEEL_DARK; // canto en sombra
-            } else {
-                // resplandor de la maquinaria de abajo, mas fuerte al centro
-                const fx = @as(f32, @floatFromInt(mx)) - 5.0;
-                const fy = @as(f32, @floatFromInt(my)) - 5.0;
-                const d = @sqrt(fx * fx + fy * fy);
-                c = mix(VOID, rl.Color.init(255, 170, 60, 255), 0.16 * (1.0 - @min(1.0, d / 3.5)));
-            }
-            put(buf, TEX_SIZE, x, y, c);
-        }
-    }
-}
-
-fn genNeon(buf: []rl.Color) void {
-    genPanel(buf, 90210, 0.75);
-    var y: i32 = 0;
-    while (y < TEX_SIZE) : (y += 1) {
-        const fy = @abs(@as(f32, @floatFromInt(y)) - 32.0);
-        var x: i32 = 0;
-        while (x < TEX_SIZE) : (x += 1) {
-            var c = get(buf, TEX_SIZE, x, y);
-            if (fy <= 12) c = mix(c, NEON_CYAN, 0.30 * (1.0 - fy / 12.0));
-            if (fy <= 4) c = mix(STEEL_DARK, NEON_CYAN, 0.45);
-            if (fy <= 2) c = NEON_CYAN; // nucleo emisivo
-            if ((x == 6 or x == 7 or x == 56 or x == 57) and fy <= 6) c = STEEL_LIGHT;
-            put(buf, TEX_SIZE, x, y, c);
-        }
-    }
-}
-
-fn genDoor(buf: []rl.Color, unlocked: bool) void {
-    genPanel(buf, 4242, 0.9);
-    var y: i32 = 0;
-    while (y < TEX_SIZE) : (y += 1) {
-        var x: i32 = 0;
-        while (x < TEX_SIZE) : (x += 1) {
-            var c = get(buf, TEX_SIZE, x, y);
-            if (x == 31 or x == 32) c = VOID; // junta entre las dos hojas
-            if ((x == 10 or x == 11 or x == 52 or x == 53) and y >= 8 and y <= 26) {
-                c = if (@rem(x, 2) == 0) STEEL_LIGHT else STEEL_MID; // piston
-            }
-            if ((y == 7 or y == 27) and ((x >= 9 and x <= 12) or (x >= 51 and x <= 54))) c = STEEL_DARK;
-            if (y >= 40 and y <= 56) {
-                c = if (@rem(@divFloor(x + y, 6), 2) == 0) HAZARD_YEL else STEEL_DARK;
-            }
-            if (x >= 29 and x <= 34 and y >= 15 and y <= 20) {
-                c = if (unlocked) NEON_CYAN else ALERT_RED;
-            }
-            put(buf, TEX_SIZE, x, y, c);
-        }
-    }
-}
-
-fn genExit(buf: []rl.Color, unlocked: bool) void {
-    var y: i32 = 0;
-    while (y < TEX_SIZE) : (y += 1) {
-        var x: i32 = 0;
-        while (x < TEX_SIZE) : (x += 1) {
-            const fx = @as(f32, @floatFromInt(x)) - 32.0;
-            const fy = @as(f32, @floatFromInt(y)) - 32.0;
-            const d = @sqrt(fx * fx + fy * fy);
-            var c = if (@rem(@as(i32, @intFromFloat(d / 6.0)), 2) == 0) STEEL_LIGHT else STEEL_DARK;
-            if (d >= 19 and d <= 22) c = if (unlocked) NEON_CYAN else ALERT_RED;
-            if (d < 8) c = VOID; // ventana oscura al centro
-            put(buf, TEX_SIZE, x, y, c);
-        }
-    }
-    // ocho pernos radiales en el anillo exterior
-    var k: usize = 0;
-    while (k < 8) : (k += 1) {
-        const a = @as(f32, @floatFromInt(k)) * std.math.tau / 8.0;
-        const bx: i32 = @intFromFloat(32.0 + 26.0 * @cos(a));
-        const by: i32 = @intFromFloat(32.0 + 26.0 * @sin(a));
-        rivet(buf, bx, by, STEEL_LIGHT);
-    }
-}
-
-fn genCeiling(buf: []rl.Color) void {
-    genPanel(buf, 777, 0.5);
-    var y: i32 = 25;
-    while (y <= 39) : (y += 1) {
-        var x: i32 = 25;
-        while (x <= 39) : (x += 1) {
-            const border = x == 25 or x == 39 or y == 25 or y == 39;
-            put(buf, TEX_SIZE, x, y, if (border) STEEL_LIGHT else NEON_AMBER);
-        }
-    }
-}
-
-fn clearSprite(buf: []rl.Color) void {
-    @memset(buf, rl.Color.init(0, 0, 0, 0));
-}
-
-/// Celda de energia: hexagono de plasma emisivo, un anillo de contencion de
-/// tres arcos que gira un sexto por cuadro, y un halo con alpha real que es lo
-/// que la hace verse encendida en vez de pegada encima del fondo.
-fn genCoreFrame(buf: []rl.Color, frame: usize) void {
-    clearSprite(buf);
-    const ff: f32 = @floatFromInt(frame);
-    const pulse = 0.5 + 0.5 * @sin(std.math.tau * ff / @as(f32, CORE_FRAMES));
-    const spin = ff * 60.0;
-
-    var y: i32 = 0;
-    while (y < SPR_SIZE) : (y += 1) {
-        var x: i32 = 0;
-        while (x < SPR_SIZE) : (x += 1) {
-            const dx = @as(f32, @floatFromInt(x)) - 24.0;
-            const dy = @as(f32, @floatFromInt(y)) - 24.0;
-            const d = @sqrt(dx * dx + dy * dy);
-
-            if (inHexagon(dx, dy, 11.0)) {
-                const c = mix(NEON_CYAN, rl.Color.init(255, 255, 255, EMISSIVE), pulse * 0.6);
-                put(buf, SPR_SIZE, x, y, rl.Color.init(c.r, c.g, c.b, EMISSIVE));
-                continue;
-            }
-            if (d >= 15.5 and d <= 17.5) {
-                var deg = std.math.radiansToDegrees(std.math.atan2(dy, dx)) - spin;
-                deg = @mod(deg, 120.0);
-                if (deg < 80.0) {
-                    put(buf, SPR_SIZE, x, y, STEEL_LIGHT);
-                    continue;
-                }
-            }
-            if (d < 21.0) {
-                const a: u8 = @intFromFloat(255.0 * (1.0 - d / 21.0) * 0.35 * (0.6 + 0.4 * pulse));
-                if (a > 4) put(buf, SPR_SIZE, x, y, rl.Color.init(NEON_CYAN.r, NEON_CYAN.g, NEON_CYAN.b, a));
-            }
-        }
-    }
-}
-
-fn inHexagon(dx: f32, dy: f32, r: f32) bool {
-    const ax = @abs(dx);
-    const ay = @abs(dy);
-    return ay <= r and ax <= 0.866 * r and (0.866 * ax + 0.5 * ay) <= 0.866 * r;
-}
-
-/// Fuga de vapor: anillos que crecen y se desvanecen. Es puro decorado, pero
-/// pone movimiento en pasillos que si no se verian muertos.
-fn genSteamFrame(buf: []rl.Color, frame: usize) void {
-    clearSprite(buf);
-    const ff: f32 = @floatFromInt(frame);
-    const radius = 6.0 + ff * 4.5;
-    const fade = 1.0 - ff / @as(f32, STEAM_FRAMES);
-
-    var y: i32 = 0;
-    while (y < SPR_SIZE) : (y += 1) {
-        var x: i32 = 0;
-        while (x < SPR_SIZE) : (x += 1) {
-            const dx = @as(f32, @floatFromInt(x)) - 24.0;
-            const dy = (@as(f32, @floatFromInt(y)) - 30.0) * 1.4;
-            const d = @sqrt(dx * dx + dy * dy);
-            if (d > radius) continue;
-            const edge = 1.0 - d / radius;
-            const wobble = 0.75 + 0.25 * noise01(@intCast(x), @intCast(y), @intCast(frame + 5));
-            const a: u8 = @intFromFloat(std.math.clamp(200.0 * edge * fade * wobble, 0, 210));
-            if (a > 6) put(buf, SPR_SIZE, x, y, rl.Color.init(190, 205, 225, a));
-        }
-    }
-}
-
 const testing = std.testing;
-
-test "el hash de ruido es determinista" {
-    try testing.expectEqual(hash2(3, 7, 99), hash2(3, 7, 99));
-    try testing.expect(hash2(3, 7, 99) != hash2(3, 8, 99));
-    for (0..64) |x| for (0..64) |y| {
-        const n = noise01(@intCast(x), @intCast(y), 1);
-        try testing.expect(n >= 0 and n < 1);
-    };
-}
 
 test "ninguna textura de pared tiene pixeles transparentes" {
     const atlas = try Atlas.init(testing.allocator);
