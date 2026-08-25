@@ -45,9 +45,8 @@ pub const Wall = enum(usize) {
 const WALL_COUNT: usize = 9;
 
 const CORE_FRAMES: usize = 6;
-const DRONE_FRAMES: usize = 4;
 const STEAM_FRAMES: usize = 4;
-const SPRITE_FRAMES: usize = CORE_FRAMES + DRONE_FRAMES + STEAM_FRAMES;
+const SPRITE_FRAMES: usize = CORE_FRAMES + STEAM_FRAMES;
 
 /// Hash entero de dos dimensiones (finalizer estilo murmur3). Es la fuente de
 /// todo el ruido de las texturas: no necesita allocator ni estado, y al ser
@@ -135,8 +134,7 @@ pub const Atlas = struct {
         genCeiling(wallSlice(walls, .ceiling));
 
         for (0..CORE_FRAMES) |f| genCoreFrame(spriteSlice(sprites, f), f);
-        for (0..DRONE_FRAMES) |f| genDroneFrame(spriteSlice(sprites, CORE_FRAMES + f), f);
-        for (0..STEAM_FRAMES) |f| genSteamFrame(spriteSlice(sprites, CORE_FRAMES + DRONE_FRAMES + f), f);
+        for (0..STEAM_FRAMES) |f| genSteamFrame(spriteSlice(sprites, CORE_FRAMES + f), f);
 
         return .{ .walls = walls, .sprites = sprites };
     }
@@ -156,12 +154,10 @@ pub const Atlas = struct {
         if (tx < 0 or ty < 0 or tx >= SPR_SIZE or ty >= SPR_SIZE) return rl.Color.init(0, 0, 0, 0);
         const first: usize = switch (kind) {
             .core => 0,
-            .drone => CORE_FRAMES,
-            .steam => CORE_FRAMES + DRONE_FRAMES,
+            .steam => CORE_FRAMES,
         };
         const count: usize = switch (kind) {
             .core => CORE_FRAMES,
-            .drone => DRONE_FRAMES,
             .steam => STEAM_FRAMES,
         };
         const base = (first + (@as(usize, frame) % count)) * SPR_PIXELS;
@@ -368,63 +364,6 @@ fn inHexagon(dx: f32, dy: f32, r: f32) bool {
     return ay <= r and ax <= 0.866 * r and (0.866 * ax + 0.5 * ay) <= 0.866 * r;
 }
 
-/// Dron de mantenimiento: chasis con bisel, ojo escaner que barre de lado a
-/// lado, rotor con alpha alternado para simular el giro, y un LED que
-/// parpadea. Cuatro cuadros bastan porque el barrido del ojo ya da la lectura
-/// de movimiento.
-fn genDroneFrame(buf: []rl.Color, frame: usize) void {
-    clearSprite(buf);
-    const eye_dx = [_]i32{ -3, 0, 3, 0 };
-    const rotor_alpha = [_]u8{ 210, 90, 210, 90 };
-    const rotor_w = [_]i32{ 11, 15, 11, 15 };
-
-    // rotor
-    var rx: i32 = 24 - rotor_w[frame];
-    while (rx <= 24 + rotor_w[frame]) : (rx += 1) {
-        var ry: i32 = 14;
-        while (ry <= 16) : (ry += 1) {
-            put(buf, SPR_SIZE, rx, ry, rl.Color.init(STEEL_LIGHT.r, STEEL_LIGHT.g, STEEL_LIGHT.b, rotor_alpha[frame]));
-        }
-    }
-    // mastil
-    var my: i32 = 16;
-    while (my <= 21) : (my += 1) {
-        put(buf, SPR_SIZE, 23, my, STEEL_MID);
-        put(buf, SPR_SIZE, 24, my, STEEL_LIGHT);
-    }
-    // chasis con esquinas recortadas
-    var y: i32 = 21;
-    while (y <= 33) : (y += 1) {
-        var x: i32 = 14;
-        while (x <= 34) : (x += 1) {
-            const edge_x = @abs(x - 24) > 8;
-            const edge_y = y < 23 or y > 31;
-            if (edge_x and edge_y) continue;
-            var c = STEEL_MID;
-            if (y <= 23) c = STEEL_LIGHT; // bisel superior
-            if (y >= 32) c = STEEL_DARK; // sombra inferior
-            put(buf, SPR_SIZE, x, y, c);
-        }
-    }
-    // ojo escaner
-    const ex = 24 + eye_dx[frame];
-    var oy: i32 = -3;
-    while (oy <= 3) : (oy += 1) {
-        var ox: i32 = -3;
-        while (ox <= 3) : (ox += 1) {
-            const fx: f32 = @floatFromInt(ox);
-            const fy: f32 = @floatFromInt(oy);
-            const d = @sqrt(fx * fx + fy * fy);
-            if (d <= 3.0) put(buf, SPR_SIZE, ex + ox, 27 + oy, if (d <= 1.6) rl.Color.init(255, 240, 200, EMISSIVE) else NEON_AMBER);
-        }
-    }
-    // LED de estado
-    if (frame < 2) {
-        put(buf, SPR_SIZE, 18, 31, ALERT_RED);
-        put(buf, SPR_SIZE, 30, 31, ALERT_RED);
-    }
-}
-
 /// Fuga de vapor: anillos que crecen y se desvanecen. Es puro decorado, pero
 /// pone movimiento en pasillos que si no se verian muertos.
 fn genSteamFrame(buf: []rl.Color, frame: usize) void {
@@ -473,7 +412,7 @@ test "cada cuadro de sprite tiene pixeles opacos y pixeles vacios" {
     defer testing.allocator.free(atlas.walls);
     defer testing.allocator.free(atlas.sprites);
 
-    const kinds = [_]SpriteKind{ .core, .drone, .steam };
+    const kinds = [_]SpriteKind{ .core, .steam };
     for (kinds) |kind| {
         var f: u32 = 0;
         while (f < kind.frameCount()) : (f += 1) {

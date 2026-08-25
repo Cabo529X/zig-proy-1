@@ -514,16 +514,16 @@ test "un sprite encima de la camara no se dibuja" {
     const reference = try testing.allocator.dupe(rl.Color, fb.pixels);
     defer testing.allocator.free(reference);
 
-    // Un dron practicamente pegado al ojo: magnificado llenaria la pantalla de
-    // bloques, asi que tiene que quedar recortado por el plano cercano.
+    // Un sprite practicamente pegado al ojo: magnificado llenaria la pantalla
+    // de bloques, asi que tiene que quedar recortado por el plano cercano.
     w.sprite_count = 1;
-    w.sprites[0] = .{ .x = 4.7, .y = 7.5, .kind = .drone, .z_offset = 0.28 };
+    w.sprites[0] = .{ .x = 4.7, .y = 7.5, .kind = .core, .z_offset = 0.28 };
     renderWorld(&fb, &w, &p, &atlas);
     renderSprites(&fb, &w, &p, &atlas);
     for (reference, fb.pixels) |a, b| try testing.expect(std.meta.eql(a, b));
 
     // Pero a una distancia normal si tiene que verse.
-    w.sprites[0] = .{ .x = 6.5, .y = 7.5, .kind = .drone, .z_offset = 0.28 };
+    w.sprites[0] = .{ .x = 6.5, .y = 7.5, .kind = .core, .z_offset = 0.28 };
     renderWorld(&fb, &w, &p, &atlas);
     renderSprites(&fb, &w, &p, &atlas);
     var changed: u32 = 0;

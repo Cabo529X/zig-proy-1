@@ -12,11 +12,6 @@ const PICKUP_RADIUS: f32 = 0.55;
 /// Segundos de silencio entre dos avisos de "esclusa sellada", para que
 /// caminar pegado a la esclusa no dispare el sonido en cada frame.
 const DENIED_COOLDOWN: f32 = 1.6;
-const DRONE_SPEED: f32 = 1.1;
-/// El dron da media vuelta si su patrulla lo lleva hacia el jugador y ya esta
-/// demasiado cerca. Sin esto se le mete en la cara, y a esa distancia el
-/// billboard se magnifica tanto que se ve como una plancha pegada a la camara.
-const DRONE_PERSONAL_SPACE: f32 = 1.1;
 
 pub const Tile = enum(u8) {
     empty,
@@ -29,13 +24,11 @@ pub const Tile = enum(u8) {
 
 pub const SpriteKind = enum(u8) {
     core,
-    drone,
     steam,
 
     pub fn frameCount(self: SpriteKind) u32 {
         return switch (self) {
             .core => 6,
-            .drone => 4,
             .steam => 4,
         };
     }
@@ -43,7 +36,6 @@ pub const SpriteKind = enum(u8) {
     pub fn framesPerSecond(self: SpriteKind) f32 {
         return switch (self) {
             .core => 10,
-            .drone => 12,
             .steam => 7,
         };
     }
@@ -56,8 +48,6 @@ pub const Sprite = struct {
     anim_time: f32 = 0, // acumulador de animacion en segundos
     z_offset: f32 = 0, // desplazamiento vertical en unidades de mundo
     alive: bool = true, // las celdas recogidas se apagan, no se borran
-    patrol_dx: f32 = 0, // solo el dron: eje y sentido de la patrulla
-    patrol_dy: f32 = 0,
 
     pub fn frame(self: Sprite) u32 {
         const n = self.kind.frameCount();
@@ -150,7 +140,6 @@ pub const World = struct {
                         self.addSprite(.{ .x = cx, .y = cy, .kind = .core });
                         self.cores_total += 1;
                     },
-                    'r' => self.addSprite(.{ .x = cx, .y = cy, .kind = .drone, .patrol_dx = 1 }),
                     's' => self.addSprite(.{ .x = cx, .y = cy, .kind = .steam }),
                     else => {},
                 }
@@ -205,7 +194,7 @@ pub const World = struct {
             self.isSolid(x0, y1) or self.isSolid(x1, y1);
     }
 
-    /// Avanza animaciones, patrullas, puertas y pickups. Devuelve el evento mas
+    /// Avanza animaciones, puertas y pickups. Devuelve el evento mas
     /// importante del frame (victoria > pickup > puerta > esclusa sellada), que
     /// es lo que main convierte en sonido.
     pub fn update(self: *World, px: f32, py: f32, dt: f32) Event {
@@ -232,14 +221,6 @@ pub const World = struct {
                         if (self.cores_left == 0) self.exit_open = true;
                         event = .pickup;
                     }
-                },
-                .drone => {
-                    // Flota casi a la altura de los ojos. Si se le sube mas,
-                    // de cerca el desplazamiento vertical del billboard
-                    // (z_offset * alto / profundidad) lo saca del cuadro y solo
-                    // se ve su borde inferior, como una placa pegada a la camara.
-                    s.z_offset = 0.10 + @sin(self.elapsed * 1.7 + @as(f32, @floatFromInt(i))) * 0.05;
-                    self.patrol(s, dt, px, py);
                 },
                 .steam => s.z_offset = -0.18,
             }
@@ -290,37 +271,6 @@ pub const World = struct {
             }
         }
         return false;
-    }
-
-    /// El dron avanza sobre su eje y se da la vuelta al encontrar un muro. Se
-    /// consulta el tile de adelante y no la colision del jugador porque el dron
-    /// flota: puede pasar por encima de las rejillas del piso.
-    fn patrol(self: *const World, s: *Sprite, dt: f32, px: f32, py: f32) void {
-        const nx = s.x + s.patrol_dx * DRONE_SPEED * dt;
-        const ny = s.y + s.patrol_dy * DRONE_SPEED * dt;
-        const ahead_x = nx + s.patrol_dx * 0.4;
-        const ahead_y = ny + s.patrol_dy * 0.4;
-
-        // Solo se da la vuelta si viene ACERCANDOSE al jugador. Si se checara
-        // nada mas la distancia, un jugador que lo persigue lo haria invertir
-        // el sentido en cada frame y el dron temblaria en el sitio.
-        const to_px = px - s.x;
-        const to_py = py - s.y;
-        const closing = to_px * s.patrol_dx + to_py * s.patrol_dy > 0;
-        const crowding = to_px * to_px + to_py * to_py < DRONE_PERSONAL_SPACE * DRONE_PERSONAL_SPACE;
-
-        if (crowding and closing) {
-            s.patrol_dx = -s.patrol_dx;
-            s.patrol_dy = -s.patrol_dy;
-            return;
-        }
-        if (self.isSolid(tileOf(ahead_x), tileOf(ahead_y))) {
-            s.patrol_dx = -s.patrol_dx;
-            s.patrol_dy = -s.patrol_dy;
-            return;
-        }
-        s.x = nx;
-        s.y = ny;
     }
 
     pub fn coresTaken(self: *const World) u32 {
@@ -416,53 +366,4 @@ test "la esclusa es solida hasta juntar todas las celdas" {
     try testing.expectEqual(@as(u32, 0), w.cores_left);
     try testing.expect(w.exit_open);
     try testing.expect(!w.isSolid(ex, ey));
-}
-
-test "el dron da media vuelta antes de meterse en la cara del jugador" {
-    const rows = [_][]const u8{
-        "##########",
-        "#........#",
-        "##########",
-    };
-    var w = World.fromRows(&rows, 0);
-    w.sprite_count = 1;
-    w.sprites[0] = .{ .x = 7.5, .y = 1.5, .kind = .drone, .patrol_dx = -1 };
-
-    const px: f32 = 1.6;
-    const py: f32 = 1.5;
-    var closest: f32 = 1e9;
-    for (0..1200) |_| {
-        _ = w.update(px, py, 1.0 / 60.0);
-        const dx = w.sprites[0].x - px;
-        const dy = w.sprites[0].y - py;
-        closest = @min(closest, @sqrt(dx * dx + dy * dy));
-        try testing.expect(w.sprites[0].x > 1.0 and w.sprites[0].x < 9.0);
-    }
-    // Se le acerca, pero nunca se le encima.
-    try testing.expect(closest > 0.9);
-    try testing.expect(closest < 3.0);
-}
-
-test "el dron no tiembla en el sitio cuando el jugador lo persigue" {
-    const rows = [_][]const u8{
-        "##########",
-        "#........#",
-        "##########",
-    };
-    var w = World.fromRows(&rows, 0);
-    w.sprite_count = 1;
-    w.sprites[0] = .{ .x = 3.0, .y = 1.5, .kind = .drone, .patrol_dx = -1 };
-
-    // El jugador lo empuja hacia la derecha; el dron debe huir sostenido, no
-    // invertir el sentido en cada frame.
-    var px: f32 = 1.6;
-    var flips: u32 = 0;
-    var prev = w.sprites[0].patrol_dx;
-    for (0..400) |_| {
-        _ = w.update(px, 1.5, 1.0 / 60.0);
-        if (w.sprites[0].patrol_dx != prev) flips += 1;
-        prev = w.sprites[0].patrol_dx;
-        px = @min(px + 0.004, 7.0);
-    }
-    try testing.expect(flips <= 3);
 }

@@ -32,7 +32,7 @@ el framebuffer completo en cada cuadro y en `Debug` va varias veces más lento.
 zig build test
 ```
 
-Corre las 64 pruebas unitarias. No abren ventana ni tocan la GPU: solo usan
+Corre las 35 pruebas unitarias. No abren ventana ni tocan la GPU: solo usan
 tipos de raylib, nunca sus funciones, así que se ejecutan headless.
 
 ```sh
@@ -103,7 +103,7 @@ hay que dar la vuelta completa a cada uno para llegar al centro.
 | Minimapa en una esquina | 10 | `hud.drawMinimap`, esquina superior derecha |
 | Música de fondo | 5 | `src/music.zig` |
 | Efectos de sonido | 10 | `src/audio.zig`, seis efectos |
-| Sprite animado | 20 | Celda de energía (6 cuadros), dron (4), vapor (4) |
+| Sprite animado | 20 | Celda de energía (6 cuadros), vapor (4) |
 | Pantalla de bienvenida | 5 | `hud.drawWelcome` |
 | Múltiples niveles | 10 | Teclas `1`/`2`/`3` y `N` al ganar |
 | Pantalla de éxito | 10 | `hud.drawSuccess` |
