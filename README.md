@@ -96,6 +96,36 @@ Medido en un Apple M3: **1480 FPS** de promedio en `ReleaseFast` y **167 FPS** e
 `Debug`, contra los 15 que pide la rúbrica. En el juego está limitado a 60 con
 vsync para no calentar la máquina de gusto.
 
+## Rúbrica cubierta
+
+Desglose de los objetivos de la rúbrica que ya cumple esta entrega:
+
+-  **15 pts** — FPS mostrados en pantalla (`rl.drawFPS`, esquina superior
+  izquierda), muy por encima del mínimo de 15.
+-  **20 pts** — Cámara con avance/retroceso y rotación (`player.zig`).
+  -  **+10 pts** — Rotación horizontal con el mouse.
+  -  **+5 pts** — Vista vertical (pitch con mouse o `Q`/`E`) y cabeceo al
+    caminar/correr (`BOB_FREQ` / `BOB_AMP` en `player.zig`, más notorio al
+    correr).
+-  **10 pts** — Minimapa en la esquina superior derecha (`hud.zig`), separado
+  del mapa principal.
+-  **5 pts** — Música de fondo generada en `music.zig`.
+-  **10 pts** — Efectos de sonido (`audio.zig`: paso, puerta, recolección,
+  acceso denegado, victoria).
+-  **20 pts** — Animación de sprites (celdas de energía y vapor, varios
+  cuadros cada uno).
+-  **5 pts** — Pantalla de bienvenida (`hud.zig`).
+-  **10 pts** — Múltiples niveles, cambiables con `1`/`2`/`3` o con `N` al
+  ganar (no por argumento de arranque ni recompilar).
+-  **10 pts** — Pantalla de éxito al recolectar todas las celdas y abrir la
+  esclusa.
+
+**Subtotal confirmado: 115 pts** 
+
+Pendiente:
+
+- **0-30 pts** — Estética del nivel: criterio subjetivo, queda a evaluación
+  del profesor.
 
 ## Por qué no se puede atravesar una pared
 
