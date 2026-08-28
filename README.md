@@ -6,10 +6,9 @@ Un ray caster estilo Wolfenstein 3D escrito desde cero en
 espacial abandonada recogiendo celdas de energía; cuando juntas todas, la
 esclusa del sector se desbloquea y puedes salir.
 
-Todo lo que se ve y se oye está generado por código: **no hay un solo archivo de
-imagen ni de audio en el repositorio**. Las texturas de las paredes, los cuadros
-de los sprites, los efectos de sonido y la música de ambiente se sintetizan al
-arrancar.
+## Video Corto
+
+![Recorrido por los tres sectores](./docs/demo.gif)
 
 ![Las tiras de neón de la Bahía de carga](./docs/captura-juego.png)
 
@@ -53,9 +52,9 @@ Para depurar y para ver el reporte de fugas del `DebugAllocator` al salir.
   eje, cabeceo y vista vertical.
 - `src/raycaster.zig` — `Framebuffer`, el DDA, las paredes texturizadas, el piso
   y techo, y los sprites recortados contra el z-buffer.
-- `src/textures.zig` — `Atlas`: todo el pixel art procedural.
+- `src/textures.zig` — `Atlas`: art
 - `src/audio.zig` — `Sfx`: síntesis de los efectos en memoria.
-- `src/music.zig` — la música de ambiente, generada como un WAV completo en RAM.
+- `src/music.zig` — la música de ambiente
 - `src/hud.zig` — minimapa, HUD y las pantallas de bienvenida y de éxito.
 
 ## Controles
