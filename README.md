@@ -91,23 +91,6 @@ hay que dar la vuelta completa a cada uno para llegar al centro.
 
 ![Una compuerta hidráulica sellada en la Sala de máquinas](./docs/captura-puerta.png)
 
-## Objetivos de la rúbrica
-
-| Objetivo | Puntos | Dónde |
-|---|---|---|
-| Estética del nivel | 30 | Paleta, niebla, píxeles emisivos, luminarias del techo |
-| Mantener ~15 FPS y mostrarlos | 15 | `rl.drawFPS`, esquina superior izquierda |
-| Cámara adelante/atrás y rotación | 20 | `src/player.zig` |
-| Rotación horizontal con el mouse | 10 | `Input.gather` |
-| Rotación en el eje Y | 5 | Cabeceo al correr **y** mirar arriba/abajo |
-| Minimapa en una esquina | 10 | `hud.drawMinimap`, esquina superior derecha |
-| Música de fondo | 5 | `src/music.zig` |
-| Efectos de sonido | 10 | `src/audio.zig`, seis efectos |
-| Sprite animado | 20 | Celda de energía (6 cuadros), vapor (4) |
-| Pantalla de bienvenida | 5 | `hud.drawWelcome` |
-| Múltiples niveles | 10 | Teclas `1`/`2`/`3` y `N` al ganar |
-| Pantalla de éxito | 10 | `hud.drawSuccess` |
-| Texturas dibujadas por nosotros | 10 | `src/textures.zig`, generadas por código |
 
 Medido en un Apple M3: **1480 FPS** de promedio en `ReleaseFast` y **167 FPS** en
 `Debug`, contra los 15 que pide la rúbrica. En el juego está limitado a 60 con
