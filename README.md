@@ -113,20 +113,6 @@ Medido en un Apple M3: **1480 FPS** de promedio en `ReleaseFast` y **167 FPS** e
 `Debug`, contra los 15 que pide la rúbrica. En el juego está limitado a 60 con
 vsync para no calentar la máquina de gusto.
 
-## Cómo se dibujan las texturas
-
-![Las nueve texturas del atlas](./docs/texturas.png)
-
-Todo el pixel art sale de una función de hash entera de dos dimensiones, sin
-allocator y sin estado, así que la misma textura se genera idéntica en cada
-corrida y se puede fijar en una prueba. Sobre ese ruido se construyen las juntas
-de placa, los remaches, los barrotes de las rejillas y las franjas de peligro.
-
-El truco que más rinde es el canal alfa: un píxel con `a == 254` se marca como
-**emisivo** y el renderizador lo dibuja sin niebla ni sombreado de cara. Por eso
-las tiras de neón y las luminarias del techo siguen brillando al fondo de un
-pasillo mientras el metal a su alrededor se apaga con la distancia, que es lo que
-da la lectura de nave iluminada.
 
 ## Por qué no se puede atravesar una pared
 
@@ -147,18 +133,6 @@ independientes y cinco pruebas que las respaldan:
 La prueba más valiosa del proyecto es `"cada nivel esta cerrado por paredes en
 todo su borde"`, que recorre los tres niveles verificando el perímetro completo:
 mientras pase, ninguna de las tres defensas puede quedar sin respaldo.
-
-## Extra: el audio no toca el disco
-
-Los seis efectos se sintetizan en un solo buffer que se reutiliza y se libera
-antes de que `Sfx.init` retorne, porque raylib copia las muestras al subirlas al
-dispositivo. La música es un WAV de 32 segundos armado completo en memoria y
-cargado con `loadMusicStreamFromMemory`.
-
-Que el loop no tenga costura no es casualidad: todas las frecuencias se redondean
-a un múltiplo entero de 1/32 Hz, así que la onda es exactamente periódica en la
-duración del loop y el final empalma con el principio. Hay una prueba que lo
-verifica comparando la primera muestra con la que le seguiría al repetir.
 
 ![La pantalla de bienvenida](./docs/captura-menu.png)
 
