@@ -8,7 +8,7 @@ esclusa del sector se desbloquea y puedes salir.
 
 ## Video Corto
 
-![Recorrido por los tres sectores](./docs/demo.gif)
+![Recorrido por el primer sector](./docs/demo.gif)
 
 ![Las tiras de neón de la Bahía de carga](./docs/captura-juego.png)
 
